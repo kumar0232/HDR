@@ -1,0 +1,273 @@
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Digit Recognition – CNN + SVM</title>
+
+<style>
+body {
+    background: linear-gradient(135deg, #141e30, #243b55);
+    font-family: "Poppins", sans-serif;
+    color: white;
+    margin: 0;
+    padding: 0;
+}
+
+h1 {
+    margin-top: 20px;
+    text-shadow: 2px 2px 8px black;
+}
+
+.container {
+    width: 90%;
+    margin: auto;
+    padding: 20px;
+}
+
+.card {
+    background: rgba(255,255,255,0.12);
+    padding: 20px;
+    border-radius: 15px;
+    margin-bottom: 25px;
+    box-shadow: 0 0 10px #000;
+}
+
+#drawCanvas {
+    border: 3px solid #00ffbb;
+    background: white;
+    cursor: crosshair;
+    border-radius: 8px;
+}
+
+button {
+    padding: 12px 25px;
+    background: #00ffbb;
+    color: black;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: 0.3s;
+}
+button:hover {
+    transform: scale(1.05);
+    background: #00e0a7;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-size: 18px;
+}
+table, th, td {
+    border: 2px solid white;
+    padding: 10px;
+    text-align: center;
+}
+
+.tree-box {
+    background: rgba(0,0,0,0.5);
+    padding: 15px;
+    border-radius: 10px;
+}
+
+#chartContainer {
+    margin-top: 25px;
+    padding: 20px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 12px;
+}
+
+/* NEW: Best model highlight colors */
+.correct-model {
+    color: #00ff88;
+    font-weight: bold;
+}
+
+.wrong-model {
+    color: #ff4444;
+    font-weight: bold;
+}
+</style>
+
+</head>
+<body>
+
+<h1>MNIST Digit Recognition (CNN + SVM)</h1>
+
+<div class="container">
+
+<!-- DRAWING PANEL -->
+<div class="card">
+    <h2>Draw a Digit</h2>
+    <canvas id="drawCanvas" width="280" height="280"></canvas><br><br>
+    <button onclick="clearCanvas()">Clear</button>
+    <button onclick="predictDigit()">Predict</button>
+</div>
+
+<!-- RESULT TABLE -->
+<div class="card">
+<h2>Prediction Results</h2>
+
+<table>
+<tr>
+    <th>Model</th>
+    <th>Predicted Digit</th>
+    <th>Confidence</th>
+</tr>
+<tr>
+    <td>CNN</td>
+    <td id="cnn_digit">-</td>
+    <td id="cnn_prob">-</td>
+</tr>
+<tr>
+    <td>SVM</td>
+    <td id="svm_digit">-</td>
+    <td id="svm_prob">-</td>
+</tr>
+
+<!-- NEW BEST MODEL ROW -->
+<tr>
+    <td colspan="3" id="best_model_display" style="font-size:20px;">Best Model: -</td>
+</tr>
+
+</table>
+</div>
+
+<!-- TREE DISPLAY -->
+<div class="card tree-box">
+    <h3>Prediction Tree Structure</h3>
+    <pre id="tree_output">–</pre>
+</div>
+
+<!-- CHART -->
+<div id="chartContainer" class="card">
+    <h3>Timeline – CNN vs SVM Confidence (%)</h3>
+    <canvas id="timelineChart"></canvas>
+</div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+// =========================
+// Canvas Drawing
+// =========================
+let canvas = document.getElementById("drawCanvas");
+let ctx = canvas.getContext("2d");
+let drawing = false;
+
+canvas.addEventListener("mousedown", () => drawing = true);
+canvas.addEventListener("mouseup", () => drawing = false);
+canvas.addEventListener("mouseout", () => drawing = false);
+
+canvas.addEventListener("mousemove", function(e){
+    if (!drawing) return;
+
+    let rect = canvas.getBoundingClientRect();
+    let x = e.clientX - rect.left;
+    let y = e.clientY - rect.top;
+
+    ctx.fillStyle = "black";
+    ctx.beginPath();
+    ctx.arc(x, y, 12, 0, Math.PI * 2);
+    ctx.fill();
+});
+
+function clearCanvas(){
+    ctx.fillStyle = "white";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+clearCanvas();
+
+// =========================
+// Fetch Prediction
+// =========================
+async function predictDigit() {
+
+    let image = canvas.toDataURL("image/png");
+    let blob = await (await fetch(image)).blob();
+
+    let formData = new FormData();
+    formData.append("digit", blob, "canvas_digit.png");
+
+    let response = await fetch("/predict", { method: "POST", body: formData });
+    let data = await response.json();
+
+    // Update table data
+    document.getElementById("cnn_digit").innerText = data.cnn.digit;
+    document.getElementById("cnn_prob").innerText = data.cnn.prob + "%";
+
+    document.getElementById("svm_digit").innerText = data.svm.digit;
+    document.getElementById("svm_prob").innerText = data.svm.prob + "%";
+
+    // Best model display (with color)
+    let bestBox = document.getElementById("best_model_display");
+    bestBox.innerText = "Best Model: " + data.best_model;
+
+    if (data.correct) {
+        bestBox.className = "correct-model";
+    } else {
+        bestBox.className = "wrong-model";
+    }
+
+    // Update tree data
+    document.getElementById("tree_output").innerText = data.tree.join("\n");
+
+    // Update timeline chart
+    updateChart(data.cnn.prob, data.svm.prob);
+}
+
+// =========================
+// Timeline Chart – CNN + SVM
+// =========================
+let chartCtx = document.getElementById("timelineChart").getContext("2d");
+
+let timelineChart = new Chart(chartCtx, {
+    type: "line",
+    data: {
+        labels: [],
+        datasets: [
+            {
+                label: "CNN Confidence (%)",
+                data: [],
+                borderWidth: 3,
+                borderColor: "rgb(0,255,150)",
+                fill: false
+            },
+            {
+                label: "SVM Confidence (%)",
+                data: [],
+                borderWidth: 3,
+                borderColor: "rgb(255,255,0)",
+                fill: false
+            }
+        ]
+    },
+    options: {
+        scales: {
+            y: {
+                beginAtZero: true,
+                max: 100
+            }
+        }
+    }
+});
+
+function updateChart(cnnValue, svmValue){
+    let timeLabel = new Date().toLocaleTimeString();
+
+    timelineChart.data.labels.push(timeLabel);
+    timelineChart.data.datasets[0].data.push(cnnValue);
+    timelineChart.data.datasets[1].data.push(svmValue);
+
+    timelineChart.update();
+}
+</script>
+
+</body>
+</html>
