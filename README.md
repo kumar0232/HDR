@@ -7,3 +7,4 @@ We focuses on developing an intelligent Handwritten Digit Recognition system tha
 
 
 
+<img width="661" height="411" alt="Sample_Input" src="https://github.com/user-attachments/assets/16d90679-df7c-43e4-b556-ba94a428e44d" />
